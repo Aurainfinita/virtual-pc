@@ -1,53 +1,64 @@
 name: CI
 
-on: [push, workflow_dispatch]
+on:
+  workflow_dispatch:
 
 jobs:
-
-
   build:
-
-
     runs-on: windows-latest
-
+    timeout-minutes: 60
 
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Baixar ngrok
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-windows-amd64.zip" -OutFile "ngrok.zip"
+          Expand-Archive ngrok.zip -DestinationPath .
+          .\ngrok.exe version
+
+      - name: Autenticar ngrok
+        shell: pwsh
+        env:
+          NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
+        run: |
+          .\ngrok.exe config add-authtoken "$env:NGROK_AUTH_TOKEN"
+
+      - name: Iniciar RDP (habilitar e setar senha)
+        shell: pwsh
+        run: |
+          net user runneradmin "SenhaForte123!" 
+          reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
+          netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
+
+      - name: Iniciar túnel ngrok TCP 3389
+        shell: pwsh
+        run: |
+          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log=stdout" -NoNewWindow
+          Start-Sleep -Seconds 10
+
+      - name: Mostrar URL TCP do ngrok
+        shell: pwsh
+        run: |
+          $tunnels = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels"
+          $tcp = $tunnels.tunnels | Where-Object { $_.proto -eq "tcp" }
+          if (-not $tcp) {
+            Write-Error "Nenhum túnel TCP encontrado no ngrok."
+          } else {
+            $url = $tcp.public_url
+            Write-Host "======================================"
+            Write-Host "  NGROK TCP RDP: $url"
+            Write-Host "  Usuario: runneradmin"
+            Write-Host "  Senha:   SenhaForte123!"
+            Write-Host "======================================"
+          }
+
+      - name: Manter sessão por 20 minutos
+        shell: pwsh
+        run: |
+          Write-Host "Mantendo a VM online por 20 minutos para você conectar via RDP..."
+          Start-Sleep -Seconds 1200
 
 
-    - name: Download
-
-
-      run: Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
-
-
-    - name: Extract
-
-
-      run: Expand-Archive ngrok.zip
-
-
-    - name: Auth
-
-
-      run: .\ngrok\ngrok.exe authtoken 2Nb2ImLGfWMVBmdl67qRNMiVwDp_3yVL5dfBZQUjbBrEkBAhA
-      
-
-    - name: Enable TS
-
-
-      run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server'-name "fDenyTSConnections" -Value 0
-
-
-    - run: Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
-
-
-    - run: Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
-
-
-    - run: Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd!" -Force)
-
-
-    - name: Create Tunnel
-
-
-      run: .\ngrok\ngrok.exe tcp 3389
