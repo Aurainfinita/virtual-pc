@@ -33,16 +33,35 @@ jobs:
           reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
 
-      - name: Iniciar túnel ngrok TCP 3389
+         - name: Iniciar túnel ngrok TCP 3389
         shell: pwsh
         run: |
-          Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389 --log=stdout" -NoNewWindow
+          .\ngrok.exe tcp 3389 --log=stdout > ngrok.log 2>&1 &
           Start-Sleep -Seconds 10
+          Get-Content ngrok.log
 
       - name: Mostrar URL TCP do ngrok
         shell: pwsh
         run: |
-          $tunnels = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels"
+          $maxTries = 10
+          $try = 0
+          $ok = $false
+          do {
+            try {
+              $tunnels = Invoke-RestMethod -Uri "http://127.0.0.1:4040/api/tunnels"
+              $ok = $true
+            } catch {
+              Write-Host "ngrok ainda não respondeu, tentando de novo..."
+              Start-Sleep -Seconds 3
+              $try++
+            }
+          } while (-not $ok -and $try -lt $maxTries)
+
+          if (-not $ok) {
+            Write-Error "Não foi possível conectar à API do ngrok em 127.0.0.1:4040."
+            exit 1
+          }
+
           $tcp = $tunnels.tunnels | Where-Object { $_.proto -eq "tcp" }
           if (-not $tcp) {
             Write-Error "Nenhum túnel TCP encontrado no ngrok."
@@ -54,6 +73,7 @@ jobs:
             Write-Host "  Senha:   SenhaForte123!"
             Write-Host "======================================"
           }
+
 
       - name: Manter sessão por 20 minutos
         shell: pwsh
